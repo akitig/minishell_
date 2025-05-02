@@ -90,6 +90,16 @@ assert '/bin/pwd'
 assert '/bin/echo'
 assert '/bin/ls'
 
+# STEP3
+# PATH command
+assert 'pwd'
+assert 'echo'
+assert 'ls'
+assert './a.out'
+# no such command
+assert 'a.out'
+assert 'nosuchfile'
+
 # ----------------------------------------------------------------- 
 cleanup
 
