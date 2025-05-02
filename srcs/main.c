@@ -1,4 +1,4 @@
-#include "libft/libft.h"
+#include "../libft/libft.h"
 #include <readline/history.h>
 #include <readline/readline.h>
 #include <sys/types.h>
