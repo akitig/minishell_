@@ -1,6 +1,6 @@
 #!/bin/bash
 
-// ----------------------------------------------------------------- 
+# ----------------------------------------------------------------- 
 
 RED="\033[31m"
 GREEN="\033[32m"
@@ -77,12 +77,22 @@ assert() {
 }
 
 rm -f error.log
-// ----------------------------------------------------------------- 
 
+# ----------------------------------------------------------------- 
 
+# STEP1
 # Empty line(EOF)
 assert ''
 
+# STEP2
 # bin command
 assert '/bin/pwd'
 assert '/bin/echo'
+assert '/bin/ls'
+
+# ----------------------------------------------------------------- 
+cleanup
+
+if [ -f error.log ]; then
+	echo -e $RED"Some tests have failed. Please review the error.log for more information."$RESET
+fi
