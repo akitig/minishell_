@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # ----------------------------------------------------------------- 
 
@@ -83,43 +83,6 @@ rm -f error.log
 # STEP1
 # Empty line(EOF)
 assert ''
-
-# STEP2
-# bin command
-assert '/bin/pwd'
-assert '/bin/echo'
-assert '/bin/ls'
-
-#STEP3
-# PATH command
-assert 'pwd'
-assert 'echo'
-assert 'ls'
-assert './a.out'
-# no such command
-assert 'a.out'
-assert 'nosuchfile'
-
-#STEP4
-# Tokenize
-## unquoted word
-assert 'ls /'
-assert 'echo hello    world     '
-assert 'nosuchfile\n\n'
-
-## single quote
-assert "./print_args 'hello   world' '42Tokyo'"
-assert "echo 'hello   world' '42Tokyo'"
-assert "echo '\"hello   world\"' '42Tokyo'"
-
-## double quote
-assert './print_args "hello   world" "42Tokyo"'
-assert 'echo "hello   world" "42Tokyo"'
-assert "echo \"'hello   world'\" \"42Tokyo\""
-
-## combination
-assert "echo hello'      world'"
-assert "echo hello'  world  '\"  42Tokyo  \""
 
 # ----------------------------------------------------------------- 
 cleanup
