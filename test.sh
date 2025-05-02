@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # ----------------------------------------------------------------- 
 
@@ -83,6 +83,12 @@ rm -f error.log
 # STEP1
 # Empty line(EOF)
 assert ''
+
+# STEP2
+# bin command
+assert '/bin/pwd'
+assert '/bin/echo'
+assert '/bin/ls'
 
 # ----------------------------------------------------------------- 
 cleanup
