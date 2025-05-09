@@ -56,6 +56,12 @@ char	*search_path(const char *filename)
 
 	if (!filename)
 		return (NULL);
+	if (ft_strchr(filename, '/'))
+	{
+		if (access(filename, X_OK) == 0)
+			return (ft_strdup(filename));
+		return (NULL);
+	}
 	env_path = getenv("PATH");
 	if (!env_path)
 		return (NULL);
