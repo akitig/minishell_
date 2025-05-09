@@ -1,15 +1,23 @@
-#include "../libft/libft.h"
 #include <limits.h>
 #include <readline/history.h>
 #include <readline/readline.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-void			fatal_error(const char *msg) __attribute__((noreturn));
+#define TK_WORD 0
+#define TK_RESERVED 1
+#define TK_OP 2
+#define TK_EOF 3
+
+typedef struct s_token
+{
+	char			*word;
+	int				kind;
+	struct s_token	*next;
+}					t_token;
 
 void	fatal_error(const char *msg)
 {
@@ -17,190 +25,206 @@ void	fatal_error(const char *msg)
 	exit(1);
 }
 
-static size_t	copy_dir(char *full_path, const char *dir)
+t_token	*new_token(char *word, int kind)
 {
-	size_t	i;
+	t_token	*tok;
+
+	tok = calloc(1, sizeof(*tok));
+	if (!tok)
+		fatal_error("calloc");
+	tok->word = word;
+	tok->kind = kind;
+	return (tok);
+}
+
+int	is_blank(char c)
+{
+	return (c == ' ' || c == '\t' || c == '\n');
+}
+
+int	consume_blank(char **rest, char *line)
+{
+	if (is_blank(*line))
+	{
+		while (*line && is_blank(*line))
+			line++;
+		*rest = line;
+		return (1);
+	}
+	*rest = line;
+	return (0);
+}
+
+int	startswith(const char *s, const char *kw)
+{
+	return (strncmp(s, kw, strlen(kw)) == 0);
+}
+
+int	is_metacharacter(char c)
+{
+	return (strchr("|&;()<> \t\n", c) != NULL);
+}
+
+int	is_operator(const char *s)
+{
+	static char	*ops[] = {"||", "&", "&&", ";", ";;", "(", ")", "|", "\n"};
+	size_t		i;
 
 	i = 0;
-	while (dir[i] && i < PATH_MAX)
+	while (i < sizeof(ops) / sizeof(*ops))
 	{
-		full_path[i] = dir[i];
-		i += 1;
-		if (i + 1 == PATH_MAX)
-			break ;
+		if (startswith(s, ops[i]))
+			return (1);
+		i++;
 	}
-	return (i);
+	return (0);
 }
 
-static void	append_filename(char *full_path, const char *filename, size_t i)
+int	is_word(const char *s)
 {
-	size_t	j;
+	return (*s && !is_metacharacter(*s));
+}
 
-	j = 0;
-	if ((int)i + 1 >= PATH_MAX - 1)
-		return ;
-	full_path[i] = '/';
-	i += 1;
-	while (filename[j] && i < PATH_MAX - 1)
+t_token	*operator_token(char **rest, char *line)
+{
+	static char	*ops[] = {"||", "&", "&&", ";", ";;", "(", ")", "|", "\n"};
+	char		*op;
+	size_t		i;
+
+	i = 0;
+	while (i < sizeof(ops) / sizeof(*ops))
 	{
-		full_path[i] = filename[j];
-		i += 1;
-		j += 1;
+		if (startswith(line, ops[i]))
+		{
+			op = strdup(ops[i]);
+			if (!op)
+				fatal_error("strdup");
+			*rest = line + strlen(op);
+			return (new_token(op, TK_OP));
+		}
+		i++;
 	}
-	full_path[i] = '\0';
+	fatal_error("Unexpected operator");
+	return (NULL);
 }
 
-static void	build_path(char *full_path, const char *dir, const char *filename)
+t_token	*word_token(char **rest, char *line)
 {
-	size_t	i;
+	const char	*start = line;
+	char		*word;
 
-	i = copy_dir(full_path, dir);
-	append_filename(full_path, filename, i);
+	while (*line && !is_metacharacter(*line))
+		line++;
+	word = strndup(start, line - start);
+	if (!word)
+		fatal_error("strndup");
+	*rest = line;
+	return (new_token(word, TK_WORD));
 }
 
-static int	is_executable(char *cursor, const char *filename, char *out_path)
+t_token	*tokenize(char *line)
 {
-	char	*dir;
-	int		success;
+	t_token	head;
+	t_token	*tok;
 
-	success = 0;
-	while (!success)
+	head.next = NULL;
+	tok = &head;
+	while (*line)
 	{
-		dir = ft_strtok(&cursor, ':');
-		if (dir == NULL)
-			break ;
-		build_path(out_path, dir, filename);
-		if (access(out_path, X_OK) == 0)
-			success = 1;
+		if (consume_blank(&line, line))
+			continue ;
+		else if (is_operator(line))
+			tok = tok->next = operator_token(&line, line);
+		else if (is_word(line))
+			tok = tok->next = word_token(&line, line);
+		else
+			fatal_error("Unexpected token");
 	}
-	return (success);
-}
-
-static char	*check_path(char *path_copy, const char *filename)
-{
-	char	full_path[PATH_MAX];
-	char	*result;
-	int		is_valid;
-
-	is_valid = is_executable(path_copy, filename, full_path);
-	if (is_valid)
-		result = ft_strdup(full_path);
-	else
-		result = NULL;
-	return (result);
+	tok->next = new_token(NULL, TK_EOF);
+	return (head.next);
 }
 
 char	*search_path(const char *filename)
 {
-	char	*env_path;
-	char	*path_copy;
-	char	*result;
+	char	*path;
+	char	*paths;
+	char	*token;
+	char	full[PATH_MAX];
 
-	if (!filename)
-		return (NULL);
-	env_path = getenv("PATH");
-	if (!env_path)
-		return (NULL);
-	path_copy = ft_strdup(env_path);
-	if (!path_copy)
-		return (NULL);
-	result = check_path(path_copy, filename);
-	free(path_copy);
-	return (result);
-}
-
-static char	*extract_first_line(char *line)
-{
-	size_t	len;
-	char	*first;
-
-	len = 0;
-	while (line[len])
+	path = getenv("PATH");
+	paths = strdup(path);
+	token = strtok(paths, ":");
+	while (token)
 	{
-		if (line[len] == '\n')
-			break ;
-		len += 1;
+		snprintf(full, PATH_MAX, "%s/%s", token, filename);
+		if (access(full, X_OK) == 0)
+		{
+			free(paths);
+			return (strdup(full));
+		}
+		token = strtok(NULL, ":");
 	}
-	first = malloc(len + 1);
-	if (!first)
-		return (NULL);
-	ft_strlcpy(first, line, len + 1);
-	return (first);
+	free(paths);
+	return (NULL);
 }
 
-static int	skip_empty_line(char *line)
+void	free_tokens(t_token *token)
 {
-	char	*trimmed;
-	int		is_empty;
+	t_token	*tmp;
 
-	trimmed = ft_strtrim(line, " \t\n");
-	if (!trimmed)
-		return (1);
-	if (*trimmed == '\0')
-		is_empty = 1;
-	else
-		is_empty = 0;
-	free(trimmed);
-	return (is_empty);
+	while (token)
+	{
+		tmp = token->next;
+		free(token->word);
+		free(token);
+		token = tmp;
+	}
 }
 
-static int	execute_cmd(char *path, char *first, char **environ, int *wstatus)
+int	interpret(char *line, char **envp)
 {
-	pid_t	pid;
+	t_token	*token;
+	t_token	*head;
+	char	*path;
 	char	*argv[2];
-	int		result;
+	int		status;
+	pid_t	pid;
 
-	argv[0] = first;
+	token = tokenize(line);
+	if (!token || token->kind != TK_WORD)
+		return (127);
+	head = token;
+	if (strchr(token->word, '/'))
+		path = strdup(token->word);
+	else
+		path = search_path(token->word);
+	if (!path || access(path, X_OK) != 0)
+	{
+		dprintf(2, "command not found: %s\n", token->word);
+		free(path);
+		free_tokens(head);
+		return (127);
+	}
+	argv[0] = token->word;
 	argv[1] = NULL;
 	pid = fork();
 	if (pid < 0)
 		fatal_error("fork");
 	if (pid == 0)
-		execve(path, argv, environ);
-	wait(wstatus);
-	result = WEXITSTATUS(*wstatus);
-	return (result);
-}
-
-int	interpret(char *line)
-{
-	extern char	**environ;
-	char		*path;
-	char		*first;
-	int			wstatus;
-	int			status;
-
-	first = extract_first_line(line);
-	if (!first)
-		return (127);
-	if (skip_empty_line(first))
-	{
-		free(first);
-		return (127);
-	}
-	if (ft_strchr(first, '/'))
-		path = ft_strdup(first);
-	else
-		path = search_path(first);
-	if (!path || access(path, X_OK) != 0)
-	{
-		dprintf(STDERR_FILENO, "command not found: %s\n", first);
-		free(first);
-		free(path);
-		return (127);
-	}
-	wstatus = 0;
-	status = execute_cmd(path, first, environ, &wstatus);
-	free(first);
+		execve(path, argv, envp);
+	wait(&status);
 	free(path);
-	return (status);
+	free_tokens(head);
+	return (WEXITSTATUS(status));
 }
 
-int	main(void)
+int	main(int argc, char **argv, char **envp)
 {
-	int status;
-	char *line;
+	char	*line;
+	int		status;
 
+	(void)argc;
+	(void)argv;
 	rl_outstream = stderr;
 	status = 0;
 	while (1)
@@ -210,7 +234,7 @@ int	main(void)
 			break ;
 		if (*line)
 			add_history(line);
-		status = interpret(line);
+		status = interpret(line, envp);
 		free(line);
 	}
 	exit(status);
