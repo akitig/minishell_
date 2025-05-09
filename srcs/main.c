@@ -121,6 +121,25 @@ t_token	*word_token(char **rest, char *line)
 	*rest = line;
 	return (new_token(word, TK_WORD));
 }
+t_token	*quote_token(char **rest, char *line)
+{
+	char	*start;
+	char	*word;
+	size_t	len;
+
+	line++; // skip leading quote
+	start = line;
+	while (*line && *line != '\'')
+		line++;
+	if (*line != '\'')
+		fatal_error("Unclosed quote");
+	len = line - start;
+	word = strndup(start, len);
+	if (!word)
+		fatal_error("strndup");
+	*rest = line + 1;
+	return (new_token(word, TK_WORD));
+}
 
 t_token	*tokenize(char *line)
 {
@@ -133,6 +152,8 @@ t_token	*tokenize(char *line)
 	{
 		if (consume_blank(&line, line))
 			continue ;
+		else if (*line == '\'')
+			tok = tok->next = quote_token(&line, line);
 		else if (is_operator(line))
 			tok = tok->next = operator_token(&line, line);
 		else if (is_word(line))
