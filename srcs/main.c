@@ -1,6 +1,7 @@
 #include <limits.h>
 #include <readline/history.h>
 #include <readline/readline.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,16 +16,29 @@
 
 typedef struct s_token
 {
-	char			*word;
-	int				kind;
-	int				joined;
-	struct s_token	*next;
-}					t_token;
+	char				*word;
+	int					kind;
+	int					joined;
+	struct s_token		*next;
+}						t_token;
 
 typedef struct s_context
 {
-	int				syntax_error;
-}					t_context;
+	int					syntax_error;
+}						t_context;
+
+typedef enum e_node_kind
+{
+	ND_SIMPLE_CMD,
+}						t_node_kind;
+
+typedef struct s_node	t_node;
+struct					s_node
+{
+	t_token				*args;
+	t_node_kind			kind;
+	t_node				*next;
+};
 
 void	fatal_error(const char *msg)
 {
@@ -69,7 +83,6 @@ int	startswith(const char *s, const char *kw)
 
 int	is_metacharacter(char c)
 {
-	/* シングル／ダブルクォートも区切り文字に */
 	return (strchr("|&;()<> \t\n'\"", c) != NULL);
 }
 
@@ -133,16 +146,15 @@ t_token	*word_token(char **rest, char *start, int joined)
 	tok->joined = joined;
 	return (tok);
 }
-
 t_token	*quote_token(char **rest, char *start, int joined, t_context *ctx)
 {
 	char	quote;
 	char	*p;
 	char	*word;
+	size_t	len;
 	t_token	*tok;
 
-	quote = *start;
-	start++;
+	quote = *start++;
 	p = start;
 	while (*p && *p != quote)
 		p++;
@@ -152,7 +164,8 @@ t_token	*quote_token(char **rest, char *start, int joined, t_context *ctx)
 		ctx->syntax_error = 1;
 		return (NULL);
 	}
-	word = strndup(start, p - start);
+	len = p - (start - 1) + 1;
+	word = strndup(start - 1, len); // クォートごとコピー
 	if (!word)
 		fatal_error("strndup");
 	*rest = p + 1;
@@ -208,25 +221,35 @@ t_token	*tokenize(char *line, t_context *ctx)
 	tok->next = new_token(NULL, TK_EOF);
 	return (head.next);
 }
-
 char	*remove_quotes(const char *word)
 {
-	size_t	len;
-	char	*new_word;
 	size_t	i;
 	size_t	j;
+	char	quote;
+	size_t	len;
+	char	*new_word;
 
-	len = strlen(word);
-	new_word = malloc(len + 1);
 	i = 0;
 	j = 0;
+	quote = 0;
+	len = strlen(word);
+	new_word = malloc(len + 1);
 	if (!new_word)
 		fatal_error("malloc");
-	while (word[i])
+	while (i < len)
 	{
-		if (word[i] != '\'' && word[i] != '"')
-			new_word[j++] = word[i];
-		i++;
+		if ((word[i] == '\'' || word[i] == '"') && !quote)
+		{
+			quote = word[i]; // クォート開始
+			i++;
+		}
+		else if (word[i] == quote)
+		{
+			quote = 0; // クォート終了
+			i++;
+		}
+		else
+			new_word[j++] = word[i++];
 	}
 	new_word[j] = '\0';
 	return (new_word);
@@ -234,16 +257,16 @@ char	*remove_quotes(const char *word)
 
 void	expand_token(t_token *token)
 {
-	char	*new_word;
+	char	*tmp;
 
 	while (token)
 	{
 		if (token->kind == TK_WORD && (strchr(token->word, '\'')
 					|| strchr(token->word, '"')))
 		{
-			new_word = remove_quotes(token->word);
+			tmp = remove_quotes(token->word);
 			free(token->word);
-			token->word = new_word;
+			token->word = tmp;
 		}
 		token = token->next;
 	}
@@ -254,16 +277,15 @@ t_token	*expand_and_merge_tokens(t_token *tokens)
 	t_token	*head;
 	t_token	*cur;
 	t_token	*prev;
+	t_token	*node;
 	size_t	newlen;
 	char	*tmp;
-	t_token	*node;
 
-	/* EOF のみなら新しい EOF を返す */
-	if (tokens->kind == TK_EOF)
-		return (new_token(NULL, TK_EOF));
 	head = NULL;
 	cur = NULL;
 	prev = NULL;
+	if (tokens->kind == TK_EOF)
+		return (new_token(NULL, TK_EOF));
 	while (tokens->kind != TK_EOF)
 	{
 		if (tokens->joined && prev)
@@ -292,6 +314,59 @@ t_token	*expand_and_merge_tokens(t_token *tokens)
 	cur->next = new_token(NULL, TK_EOF);
 	return (head);
 }
+
+bool	at_eof(t_token *tok)
+{
+	return (tok->kind == TK_EOF);
+}
+
+t_node	*new_node(t_node_kind kind)
+{
+	t_node	*node;
+
+	node = calloc(1, sizeof(*node));
+	if (!node)
+		fatal_error("calloc");
+	node->kind = kind;
+	return (node);
+}
+
+t_token	*tokdup(t_token *tok)
+{
+	char	*word;
+
+	word = strdup(tok->word);
+	if (!word)
+		fatal_error("strdup");
+	return (new_token(word, tok->kind));
+}
+
+void	append_tok(t_token **tokens, t_token *tok)
+{
+	if (!*tokens)
+	{
+		*tokens = tok;
+		return ;
+	}
+	append_tok(&(*tokens)->next, tok);
+}
+
+t_node	*parse(t_token *tok)
+{
+	t_node	*node;
+
+	node = new_node(ND_SIMPLE_CMD);
+	while (tok && !at_eof(tok))
+	{
+		if (tok->kind == TK_WORD)
+			append_tok(&node->args, tokdup(tok));
+		else
+			fatal_error("Unsupported token in parser");
+		tok = tok->next;
+	}
+	return (node);
+}
+
 char	*search_path(const char *filename)
 {
 	char	*path;
@@ -332,12 +407,13 @@ void	free_tokens(t_token *token)
 int	interpret(char *line, char **envp, t_context *ctx)
 {
 	t_token	*tokens;
-	char	*argv[MAX_ARGS];
-	int		i;
+	t_node	*node;
+	t_token	*tok;
 	char	*path;
+	char	**argv;
 	pid_t	pid;
-	int		status;
 
+	int status, i = 0;
 	tokens = tokenize(line, ctx);
 	if (!tokens)
 	{
@@ -349,23 +425,32 @@ int	interpret(char *line, char **envp, t_context *ctx)
 		return (127);
 	}
 	tokens = expand_and_merge_tokens(tokens);
-	i = 0;
-	while (tokens && tokens->kind == TK_WORD && i < MAX_ARGS - 1)
+	node = parse(tokens);
+	if (!node || !node->args)
 	{
-		argv[i++] = tokens->word;
-		tokens = tokens->next;
+		free_tokens(tokens);
+		return (127);
 	}
+	expand_token(node->args);
+	argv = calloc(MAX_ARGS, sizeof(char *));
+	if (!argv)
+		fatal_error("calloc");
+	tok = node->args;
+	while (tok && i < MAX_ARGS - 1)
+		argv[i++] = tok->word, tok = tok->next;
 	argv[i] = NULL;
 	if (!argv[0])
+	{
+		free(argv);
+		free_tokens(tokens);
 		return (127);
-	if (strchr(argv[0], '/'))
-		path = strdup(argv[0]);
-	else
-		path = search_path(argv[0]);
+	}
+	path = strchr(argv[0], '/') ? strdup(argv[0]) : search_path(argv[0]);
 	if (!path || access(path, X_OK) != 0)
 	{
 		dprintf(2, "command not found: %s\n", argv[0]);
 		free(path);
+		free(argv);
 		free_tokens(tokens);
 		return (127);
 	}
@@ -376,18 +461,22 @@ int	interpret(char *line, char **envp, t_context *ctx)
 		execve(path, argv, envp);
 	wait(&status);
 	free(path);
+	free(argv);
 	free_tokens(tokens);
 	return (WEXITSTATUS(status));
 }
 
 int	main(int argc, char **argv, char **envp)
 {
+	t_context	ctx;
+	char		*line;
+	int			status;
+
 	(void)argc;
 	(void)argv;
+	ctx.syntax_error = 0;
+	status = 0;
 	rl_outstream = stderr;
-	t_context ctx = {0};
-	char *line;
-	int status = 0;
 	while (1)
 	{
 		line = readline("minishell > ");
