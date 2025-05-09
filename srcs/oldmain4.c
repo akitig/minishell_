@@ -13,18 +13,15 @@
 #define TK_EOF 3
 #define MAX_ARGS 256
 
+int					g_syntax_error = 0;
+
 typedef struct s_token
 {
 	char			*word;
 	int				kind;
-	int				joined;
+	int joined; // ← 前のトークンと連結すべきなら 1
 	struct s_token	*next;
 }					t_token;
-
-typedef struct s_context
-{
-	int				syntax_error;
-}					t_context;
 
 void	fatal_error(const char *msg)
 {
@@ -69,8 +66,7 @@ int	startswith(const char *s, const char *kw)
 
 int	is_metacharacter(char c)
 {
-	/* シングル／ダブルクォートも区切り文字に */
-	return (strchr("|&;()<> \t\n'\"", c) != NULL);
+	return (strchr("|&;()<> \t\n", c) != NULL);
 }
 
 int	is_operator(const char *s)
@@ -134,7 +130,7 @@ t_token	*word_token(char **rest, char *start, int joined)
 	return (tok);
 }
 
-t_token	*quote_token(char **rest, char *start, int joined, t_context *ctx)
+t_token	*quote_token(char **rest, char *start, int joined)
 {
 	char	quote;
 	char	*p;
@@ -142,14 +138,14 @@ t_token	*quote_token(char **rest, char *start, int joined, t_context *ctx)
 	t_token	*tok;
 
 	quote = *start;
-	start++;
+	start++; // skip quote
 	p = start;
 	while (*p && *p != quote)
 		p++;
 	if (*p != quote)
 	{
 		dprintf(2, "minishell: syntax error: unclosed quote\n");
-		ctx->syntax_error = 1;
+		g_syntax_error = 1;
 		return (NULL);
 	}
 	word = strndup(start, p - start);
@@ -172,16 +168,16 @@ int	is_joined(const char *line, int prev_blank)
 	return (0);
 }
 
-t_token	*tokenize(char *line, t_context *ctx)
+t_token	*tokenize(char *line)
 {
 	t_token	head;
 	t_token	*tok;
 	t_token	*new;
 	int		prev_blank;
 
-	tok = &head;
 	prev_blank = 1;
 	head.next = NULL;
+	tok = &head;
 	while (*line)
 	{
 		if (consume_blank(&line, line))
@@ -190,7 +186,7 @@ t_token	*tokenize(char *line, t_context *ctx)
 			continue ;
 		}
 		if (*line == '\'' || *line == '"')
-			new = quote_token(&line, line, is_joined(line, prev_blank), ctx);
+			new = quote_token(&line, line, is_joined(line, prev_blank));
 		else if (is_word(line))
 			new = word_token(&line, line, is_joined(line, prev_blank));
 		else if (is_operator(line))
@@ -207,6 +203,43 @@ t_token	*tokenize(char *line, t_context *ctx)
 	}
 	tok->next = new_token(NULL, TK_EOF);
 	return (head.next);
+}
+
+char	*search_path(const char *filename)
+{
+	char	*path;
+	char	*paths;
+	char	*token;
+	char	full[PATH_MAX];
+
+	path = getenv("PATH");
+	paths = strdup(path);
+	token = strtok(paths, ":");
+	while (token)
+	{
+		snprintf(full, PATH_MAX, "%s/%s", token, filename);
+		if (access(full, X_OK) == 0)
+		{
+			free(paths);
+			return (strdup(full));
+		}
+		token = strtok(NULL, ":");
+	}
+	free(paths);
+	return (NULL);
+}
+
+void	free_tokens(t_token *token)
+{
+	t_token	*tmp;
+
+	while (token)
+	{
+		tmp = token->next;
+		free(token->word);
+		free(token);
+		token = tmp;
+	}
 }
 
 char	*remove_quotes(const char *word)
@@ -252,108 +285,84 @@ void	expand_token(t_token *token)
 t_token	*expand_and_merge_tokens(t_token *tokens)
 {
 	t_token	*head;
-	t_token	*cur;
-	t_token	*prev;
-	size_t	newlen;
+	t_token	**cur;
+	t_token	*t;
+	char	*merged;
 	char	*tmp;
-	t_token	*node;
 
-	/* EOF のみなら新しい EOF を返す */
-	if (tokens->kind == TK_EOF)
-		return (new_token(NULL, TK_EOF));
 	head = NULL;
-	cur = NULL;
-	prev = NULL;
-	while (tokens->kind != TK_EOF)
+	cur = &head;
+	t = tokens;
+	merged = NULL;
+	while (t && t->kind != TK_EOF)
 	{
-		if (tokens->joined && prev)
+		if (t->joined)
 		{
-			newlen = strlen(prev->word) + strlen(tokens->word);
-			tmp = malloc(newlen + 1);
-			if (!tmp)
-				fatal_error("malloc");
-			strcpy(tmp, prev->word);
-			strcat(tmp, tokens->word);
-			free(prev->word);
-			prev->word = tmp;
+			if (!merged)
+				merged = strdup(t->word);
+			else
+			{
+				tmp = malloc(strlen(merged) + strlen(t->word) + 1);
+				if (!tmp)
+					fatal_error("malloc");
+				strcpy(tmp, merged);
+				strcat(tmp, t->word);
+				free(merged);
+				merged = tmp;
+			}
 		}
 		else
 		{
-			node = new_token(strdup(tokens->word), tokens->kind);
-			if (!head)
-				head = node;
+			if (merged)
+			{
+				tmp = malloc(strlen(merged) + strlen(t->word) + 1);
+				if (!tmp)
+					fatal_error("malloc");
+				strcpy(tmp, merged);
+				strcat(tmp, t->word);
+				*cur = new_token(tmp, TK_WORD);
+				free(merged);
+				merged = NULL;
+			}
 			else
-				cur->next = node;
-			cur = node;
-			prev = node;
+				*cur = new_token(strdup(t->word), t->kind);
+			cur = &(*cur)->next;
 		}
-		tokens = tokens->next;
+		t = t->next;
 	}
-	cur->next = new_token(NULL, TK_EOF);
+	*cur = new_token(NULL, TK_EOF);
 	return (head);
 }
-char	*search_path(const char *filename)
+
+int	interpret(char *line, char **envp)
 {
+	t_token	*token;
+	t_token	*head;
 	char	*path;
-	char	*paths;
-	char	*token;
-	char	full[PATH_MAX];
-
-	path = getenv("PATH");
-	paths = strdup(path);
-	token = strtok(paths, ":");
-	while (token)
-	{
-		snprintf(full, PATH_MAX, "%s/%s", token, filename);
-		if (access(full, X_OK) == 0)
-		{
-			free(paths);
-			return (strdup(full));
-		}
-		token = strtok(NULL, ":");
-	}
-	free(paths);
-	return (NULL);
-}
-
-void	free_tokens(t_token *token)
-{
-	t_token	*tmp;
-
-	while (token)
-	{
-		tmp = token->next;
-		free(token->word);
-		free(token);
-		token = tmp;
-	}
-}
-
-int	interpret(char *line, char **envp, t_context *ctx)
-{
-	t_token	*tokens;
 	char	*argv[MAX_ARGS];
-	int		i;
-	char	*path;
-	pid_t	pid;
 	int		status;
+	pid_t	pid;
+	int		i;
 
-	tokens = tokenize(line, ctx);
-	if (!tokens)
+	token = tokenize(line);
+	for (t_token *t = token; t && t->kind != TK_EOF; t = t->next)
+		fprintf(stderr, "[%s] joined=%d\n", t->word, t->joined);
+	if (!token)
 	{
-		if (ctx->syntax_error)
+		if (g_syntax_error)
 		{
-			ctx->syntax_error = 0;
+			g_syntax_error = 0;
 			return (258);
 		}
 		return (127);
 	}
-	tokens = expand_and_merge_tokens(tokens);
+	token = expand_and_merge_tokens(token);
+	head = token;
 	i = 0;
-	while (tokens && tokens->kind == TK_WORD && i < MAX_ARGS - 1)
+	while (token && token->kind == TK_WORD && i < MAX_ARGS - 1)
 	{
-		argv[i++] = tokens->word;
-		tokens = tokens->next;
+		argv[i++] = token->word;
+		token = token->next;
 	}
 	argv[i] = NULL;
 	if (!argv[0])
@@ -366,28 +375,35 @@ int	interpret(char *line, char **envp, t_context *ctx)
 	{
 		dprintf(2, "command not found: %s\n", argv[0]);
 		free(path);
-		free_tokens(tokens);
+		free_tokens(head);
 		return (127);
 	}
 	pid = fork();
 	if (pid < 0)
 		fatal_error("fork");
 	if (pid == 0)
+	{
+		// fprintf(stderr, "=== ARGV ===\n");
+		// for (int i = 0; argv[i]; i++)
+		// 	fprintf(stderr, "argv[%d] = [%s]\n", i, argv[i]);
+		// fprintf(stderr, "============\n");
 		execve(path, argv, envp);
+	}
 	wait(&status);
 	free(path);
-	free_tokens(tokens);
+	free_tokens(head);
 	return (WEXITSTATUS(status));
 }
 
 int	main(int argc, char **argv, char **envp)
 {
+	char *line;
+	int status;
+
 	(void)argc;
 	(void)argv;
 	rl_outstream = stderr;
-	t_context ctx = {0};
-	char *line;
-	int status = 0;
+	status = 0;
 	while (1)
 	{
 		line = readline("minishell > ");
@@ -395,7 +411,7 @@ int	main(int argc, char **argv, char **envp)
 			break ;
 		if (*line)
 			add_history(line);
-		status = interpret(line, envp, &ctx);
+		status = interpret(line, envp);
 		free(line);
 	}
 	exit(status);

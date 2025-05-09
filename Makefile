@@ -6,7 +6,7 @@
 #    By: akunimot <akitig24@gmail.com>              +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2025/03/15 15:32:16 by akunimot          #+#    #+#              #
-#    Updated: 2025/05/02 13:43:24 by akunimot         ###   ########.fr        #
+#    Updated: 2025/05/09 14:21:11 by akunimot         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -69,7 +69,7 @@ debug:
 
 test:
 	make
-	sh test.sh
+	bash test.sh
 
 re:	fclean	all
 
