@@ -201,6 +201,46 @@ void	free_tokens(t_token *token)
 		token = tmp;
 	}
 }
+
+char	*remove_quotes(const char *word)
+{
+	size_t	len;
+	char	*new_word;
+	size_t	i;
+	size_t	j;
+
+	len = strlen(word);
+	new_word = malloc(len + 1);
+	i = 0;
+	j = 0;
+	if (!new_word)
+		fatal_error("malloc");
+	while (word[i])
+	{
+		if (word[i] != '\'')
+			new_word[j++] = word[i];
+		i++;
+	}
+	new_word[j] = '\0';
+	return (new_word);
+}
+
+void	expand_token(t_token *token)
+{
+	char	*new_word;
+
+	while (token)
+	{
+		if (token->kind == TK_WORD && strchr(token->word, '\''))
+		{
+			new_word = remove_quotes(token->word);
+			free(token->word);
+			token->word = new_word;
+		}
+		token = token->next;
+	}
+}
+
 #define MAX_ARGS 256
 
 int	interpret(char *line, char **envp)
@@ -217,6 +257,7 @@ int	interpret(char *line, char **envp)
 	if (!token || token->kind != TK_WORD)
 		return (127);
 	head = token;
+	expand_token(token);
 	i = 0;
 	while (token && token->kind == TK_WORD && i < MAX_ARGS - 1)
 	{
