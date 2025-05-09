@@ -180,33 +180,40 @@ void	free_tokens(t_token *token)
 		token = tmp;
 	}
 }
+#define MAX_ARGS 256
 
 int	interpret(char *line, char **envp)
 {
 	t_token	*token;
 	t_token	*head;
 	char	*path;
-	char	*argv[2];
+	char	*argv[MAX_ARGS];
 	int		status;
 	pid_t	pid;
+	int		i;
 
 	token = tokenize(line);
 	if (!token || token->kind != TK_WORD)
 		return (127);
 	head = token;
-	if (strchr(token->word, '/'))
-		path = strdup(token->word);
+	i = 0;
+	while (token && token->kind == TK_WORD && i < MAX_ARGS - 1)
+	{
+		argv[i++] = token->word;
+		token = token->next;
+	}
+	argv[i] = NULL;
+	if (strchr(argv[0], '/'))
+		path = strdup(argv[0]);
 	else
-		path = search_path(token->word);
+		path = search_path(argv[0]);
 	if (!path || access(path, X_OK) != 0)
 	{
-		dprintf(2, "command not found: %s\n", token->word);
+		dprintf(2, "command not found: %s\n", argv[0]);
 		free(path);
 		free_tokens(head);
 		return (127);
 	}
-	argv[0] = token->word;
-	argv[1] = NULL;
 	pid = fork();
 	if (pid < 0)
 		fatal_error("fork");
