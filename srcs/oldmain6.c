@@ -379,52 +379,45 @@ t_node	*parse(t_token *t)
 	}
 	return (n);
 }
-/* PATH 探索：実行可能ファイルを優先、なければ通常ファイルを返す */
+
+/* PATH探索（.と空文字はスキップ） */
 char	*search_path(const char *f)
 {
+	char		*env;
 	char		*cp;
 	char		*tok;
-	char		*first_fail;
 	struct stat	st;
 	char		full[PATH_MAX];
 
-	/* PATH 環境変数取得＆空チェック */
-	if (!(cp = getenv("PATH")) || !*cp)
+	env = getenv("PATH");
+	if (!env || !*env)
 		return (NULL);
-	/* 複製して切り出し用にする */
-	cp = strdup_safe(cp);
-	first_fail = NULL;
-	/* ':' 区切りで１件ずつ調査 */
+	cp = strdup_safe(env);
 	tok = strtok(cp, ":");
 	while (tok)
 	{
-		/* "." または空要素はスキップ */
-		if (!strcmp(tok, ".") || *tok == '\0')
+		if (tok[0] == '.' && tok[1] == '\0')
 		{
 			tok = strtok(NULL, ":");
 			continue ;
 		}
-		/* ディレクトリ + "/" + コマンド名 */
+		if (*tok == '\0')
+		{
+			tok = strtok(NULL, ":");
+			continue ;
+		}
 		snprintf(full, PATH_MAX, "%s/%s", tok, f);
-		/* 存在かつ通常ファイルか？ */
 		if (stat(full, &st) == 0 && S_ISREG(st.st_mode))
 		{
-			/* 実行権限ありなら即返却 */
-			if (access(full, X_OK) == 0)
-			{
-				free(cp);
-				return (strdup_safe(full));
-			}
-			/* 最初の “非実行可能” ファイルを覚えておく */
-			if (!first_fail)
-				first_fail = strdup_safe(full);
+			free(cp);
+			return (strdup_safe(full));
 		}
 		tok = strtok(NULL, ":");
 	}
 	free(cp);
-	/* 実行可能はなかったが通常ファイルが見つかっていればそれを返す */
-	return (first_fail);
+	return (NULL);
 }
+
 /* トークン解放 */
 void	free_tokens(t_token *t)
 {
