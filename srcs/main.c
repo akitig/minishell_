@@ -134,10 +134,10 @@ int	is_word(const char *s)
 	return (*s && !is_metacharacter(*s));
 }
 
-/* オペレータ判定 */
 int	is_operator(const char *s)
 {
-	static char	*ops[] = {"||", "&&", ";", ";;", "(", ")", "|", "\n", ">", "<"};
+	static char	*ops[] = {"||", "&&", ";", ";;", "(", ")", "|", "\n", ">>",
+			"<<", ">", "<"};
 
 	for (size_t i = 0; i < sizeof(ops) / sizeof(*ops); i++)
 		if (startswith(s, ops[i]))
@@ -299,6 +299,45 @@ void	expand_token(t_token *t)
 		t = t->next;
 	}
 }
+/* 簡易変数展開 */
+static char	*expand_vars(const char *s)
+{
+	size_t	i;
+	size_t	j;
+	size_t	len;
+	char	*res;
+	char	var[NAME_MAX + 1];
+	char	*val;
+	size_t	k;
+
+	i = 0, j = 0, len = strlen(s);
+	res = malloc(len * 2 + 1);
+	if (!res)
+		fatal_error("malloc");
+	while (s[i])
+	{
+		if (s[i] == '$' && (isalnum((unsigned char)s[i + 1]) || s[i
+				+ 1] == '_'))
+		{
+			k = 0;
+			i++;
+			while (s[i] && (isalnum((unsigned char)s[i]) || s[i] == '_')
+				&& k < NAME_MAX)
+				var[k++] = s[i++];
+			var[k] = '\0';
+			val = getenv(var);
+			if (val)
+			{
+				strcpy(res + j, val);
+				j += strlen(val);
+			}
+		}
+		else
+			res[j++] = s[i++];
+	}
+	res[j] = '\0';
+	return (res);
+}
 
 /* 連結＋EOF追加 */
 t_token	*expand_and_merge_tokens(t_token *t)
@@ -362,6 +401,8 @@ t_node	*new_node(e_node_kind k)
 }
 
 /* 構文解析 */
+
+/* 構文解析：>, >>, <, << をスキップ */
 t_node	*parse(t_token *t)
 {
 	t_node	*n;
@@ -370,7 +411,8 @@ t_node	*parse(t_token *t)
 	while (t && !at_eof(t))
 	{
 		if (t->kind == TK_OP && (strcmp(t->word, ">") == 0 || strcmp(t->word,
-					"<") == 0))
+					">>") == 0 || strcmp(t->word, "<") == 0 || strcmp(t->word,
+					"<<") == 0))
 		{
 			t = t->next->next;
 			continue ;
@@ -505,38 +547,57 @@ char	**build_argv(t_token *t)
 	a[i] = NULL;
 	return (a);
 }
-
-/* 入力リダイレクト (<) とヒアドキュメント (<<) */
 void	apply_input_redirection(t_token *t)
 {
-	int		fd;
-	int		fds[2];
-	char	*lim;
-	char	*line2;
+	bool	used;
+	char	*ev;
 
+	int fd, pipefd[2], do_exp;
+	char *orig, *tmp, *delim, *line2;
+	used = false;
 	while (t && !at_eof(t))
 	{
 		if (t->kind == TK_OP && strcmp(t->word, "<<") == 0 && t->next)
 		{
-			lim = t->next->word;
-			if (pipe(fds) < 0)
+			orig = t->next->word;
+			/* 前のヒアドキュメント用パイプを捨てる */
+			if (used)
+			{
+				close(pipefd[0]);
+				close(pipefd[1]);
+			}
+			if (pipe(pipefd) < 0)
 				fatal_error("pipe");
+			used = true;
+			/* 区切り文字からクォートを除去 */
+			tmp = strdup_safe(orig);
+			delim = remove_quotes(tmp);
+			free(tmp);
+			/* 区切り文字にクォートがなければ変数展開する */
+			do_exp = !strchr(orig, '\'') && !strchr(orig, '\"');
 			while ((line2 = readline("> ")) != NULL)
 			{
-				if (strcmp(line2, lim) == 0)
+				if (strcmp(line2, delim) == 0)
 				{
 					free(line2);
 					break ;
 				}
-				write(fds[1], line2, strlen(line2));
-				write(fds[1], "\n", 1);
+				if (do_exp)
+				{
+					ev = expand_vars(line2);
+					write(pipefd[1], ev, strlen(ev));
+					free(ev);
+				}
+				else
+					write(pipefd[1], line2, strlen(line2));
+				write(pipefd[1], "\n", 1);
 				free(line2);
 			}
-			close(fds[1]);
-			dup2(fds[0], STDIN_FILENO);
-			close(fds[0]);
+			close(pipefd[1]);
+			free(delim);
 		}
-		else if (t->kind == TK_OP && strcmp(t->word, "<") == 0 && t->next)
+		else if (!used && t->kind == TK_OP && strcmp(t->word, "<") == 0
+			&& t->next)
 		{
 			fd = open(t->next->word, O_RDONLY);
 			if (fd < 0)
@@ -545,6 +606,11 @@ void	apply_input_redirection(t_token *t)
 			close(fd);
 		}
 		t = t->next;
+	}
+	if (used)
+	{
+		dup2(pipefd[0], STDIN_FILENO);
+		close(pipefd[0]);
 	}
 }
 
