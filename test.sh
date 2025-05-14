@@ -167,33 +167,38 @@ assert 'unset PATH\nexport PATH="/tmp/a:/tmp/b"\nsimple_test'
 assert 'unset PATH\nexport PATH="/tmp/b:/tmp/a"\nsimple_test'
 
 
-# # Redirect
-# ## Redirecting output
-# assert 'echo hello >hello.txt' 'hello.txt'
-# assert 'echo hello >f1>f2>f3' 'f1' 'f2' 'f3'
+# Redirect
+## Redirecting output
+assert 'echo hello >hello.txt' 'hello.txt'
+assert 'echo hello >f1>f2>f3' 'f1' 'f2' 'f3'
 
-# ## Redirecting input
-# assert 'cat <Makefile'# Redirect
-# ## Redirecting output
-# assert 'echo hello >hello.txt' 'hello.txt'
-# assert 'echo hello >f1>f2>f3' 'f1' 'f2' 'f3'
+## Redirecting input
+assert 'cat <Makefile'
+echo hello >f1
+echo world >f2
+echo 42Tokyo >f3
+assert 'cat <f1<f2<f3'
+rm -f f1 f2 f3
+assert 'cat <hoge'
 
-# ## Redirecting input
-# assert 'cat <Makefile'
-# echo hello >f1
-# echo world >f2
-# echo 42Tokyo >f3
-# assert 'cat <f1<f2<f3'
-# rm -f f1 f2 f3
-# assert 'cat <hoge'
-# echo hello >f1
-# echo world >f2
-# echo 42Tokyo >f3
-# assert 'cat <f1<f2<f3'
-# rm -f f1 f2 f3
-# assert 'cat <hoge'
+## Appending Redirected output
+assert 'pwd >>pwd.txt' 'pwd.txt'
+assert 'pwd >>pwd.txt \n pwd >>pwd.txt' 'pwd.txt'
 
-
+## Here Document
+assert 'cat <<EOF\nhello\nworld\nEOF\nNOPRINT'
+assert 'cat <<EOF<<eof\nhello\nworld\nEOF\neof\nNOPRINT'
+assert 'cat <<EOF\nhello\nworld'
+assert 'cat <<E"O"F\nhello\nworld\nEOF\nNOPRINT'
+assert 'cat <<EOF   \n$USER\n$NO_SUCH_VAR\n$FOO$BAR\nEOF'
+assert 'cat <<"EOF" \n$USER\n$NO_SUCH_VAR\n$FOO$BAR\nEOF'
+assert 'cat <<EO"F" \n$USER\n$NO_SUCH_VAR\n$FOO$BAR\nEOF'
+(
+	print_desc 'export EOF="eof"'
+	export EOF="eof"
+	assert 'cat <<$EOF         \neof\n$EOF\nEOF'
+	assert 'cat <<"$EOF"       \neof\n$EOF\nEOF'
+)
 
 # ----------------------------------------------------------------- 
 cleanup

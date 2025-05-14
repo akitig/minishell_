@@ -200,11 +200,11 @@ t_token	*quote_token(char **rest, char *start, int joined, t_context *ctx)
 	t->joined = joined;
 	return (t);
 }
-/* operator_token の修正：>> と << を優先してマッチ */
+
+/* オペレータトークン生成 */
 t_token	*operator_token(char **rest, char *l)
 {
-	static char	*ops[] = {"||", "&&", ";", ";;", "(", ")", "|", "\n", ">>",
-			"<<", ">", "<"};
+	static char	*ops[] = {"||", "&&", ";", ";;", "(", ")", "|", "\n", ">", "<"};
 	char		*w;
 
 	for (size_t i = 0; i < sizeof(ops) / sizeof(*ops); i++)
@@ -220,14 +220,15 @@ t_token	*operator_token(char **rest, char *l)
 	return (NULL);
 }
 
+/* 字句解析 */
 t_token	*tokenize(char *line, t_context *ctx)
 {
-	int	prev_blank;
+	int		prev_blank;
+	t_token	*n;
 
-	t_token head, *cur, *n;
+	t_token head, *cur = &head;
 	prev_blank = 1;
 	head.next = NULL;
-	cur = &head;
 	while (*line)
 	{
 		if (consume_blank(&line, line))
@@ -246,10 +247,8 @@ t_token	*tokenize(char *line, t_context *ctx)
 			fatal_error("Unexpected token");
 		if (!n)
 			return (NULL);
-		cur->next = n;
-		cur = n;
-		/* 演算子のあとは必ず“空白あり”扱いに */
-		prev_blank = (n->kind == TK_OP);
+		cur = cur->next = n;
+		prev_blank = 0;
 	}
 	cur->next = new_token(NULL, TK_EOF);
 	return (head.next);
@@ -506,37 +505,14 @@ char	**build_argv(t_token *t)
 	return (a);
 }
 
-/* 入力リダイレクト (<) とヒアドキュメント (<<) */
+/* 入力リダイレクト (<) */
 void	apply_input_redirection(t_token *t)
 {
-	int		fd;
-	int		fds[2];
-	char	*lim;
-	char	*line2;
+	int	fd;
 
 	while (t && !at_eof(t))
 	{
-		if (t->kind == TK_OP && strcmp(t->word, "<<") == 0 && t->next)
-		{
-			lim = t->next->word;
-			if (pipe(fds) < 0)
-				fatal_error("pipe");
-			while ((line2 = readline("> ")) != NULL)
-			{
-				if (strcmp(line2, lim) == 0)
-				{
-					free(line2);
-					break ;
-				}
-				write(fds[1], line2, strlen(line2));
-				write(fds[1], "\n", 1);
-				free(line2);
-			}
-			close(fds[1]);
-			dup2(fds[0], STDIN_FILENO);
-			close(fds[0]);
-		}
-		else if (t->kind == TK_OP && strcmp(t->word, "<") == 0 && t->next)
+		if (t->kind == TK_OP && strcmp(t->word, "<") == 0 && t->next)
 		{
 			fd = open(t->next->word, O_RDONLY);
 			if (fd < 0)
@@ -548,22 +524,14 @@ void	apply_input_redirection(t_token *t)
 	}
 }
 
-/* 出力リダイレクト (>) とアペンド (>>) */
+/* 出力リダイレクト (>) */
 void	apply_output_redirection(t_token *t)
 {
 	int	fd;
 
 	while (t && !at_eof(t))
 	{
-		if (t->kind == TK_OP && strcmp(t->word, ">>") == 0 && t->next)
-		{
-			fd = open(t->next->word, O_WRONLY | O_CREAT | O_APPEND, 0644);
-			if (fd < 0)
-				fatal_error("open");
-			dup2(fd, STDOUT_FILENO);
-			close(fd);
-		}
-		else if (t->kind == TK_OP && strcmp(t->word, ">") == 0 && t->next)
+		if (t->kind == TK_OP && strcmp(t->word, ">") == 0 && t->next)
 		{
 			fd = open(t->next->word, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 			if (fd < 0)
@@ -574,6 +542,7 @@ void	apply_output_redirection(t_token *t)
 		t = t->next;
 	}
 }
+
 /* コマンド実行 */
 int	run_command(char *p, char **a, t_token *t, char **envp)
 {

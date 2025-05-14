@@ -1,0 +1,57 @@
+[pwd >>pwd.txt]                                                       :status NG, expected 0 but got 1
+[pwd >>pwd.txt \n pwd >>pwd.txt]                                      :status NG, expected 0 but got 1
+[cat <<EOF\nhello\nworld\nEOF\nNOPRINT]                               :
+--- out	2025-05-14 11:01:32.783838980 +0900
++++ cmp	2025-05-14 11:01:32.779838948 +0900
+@@ -0,0 +1,2 @@
++hello
++world
+[cat <<EOF\nhello\nworld]                                             :
+--- out	2025-05-14 11:01:32.795839075 +0900
++++ cmp	2025-05-14 11:01:32.795839075 +0900
+@@ -0,0 +1,2 @@
++hello
++world
+[cat <<EOF\nhello\nworld]                                             :status NG, expected 0 but got 1
+[cat <<E"O"F\nhello\nworld\nEOF\nNOPRINT]                             :
+--- out	2025-05-14 11:01:32.803839138 +0900
++++ cmp	2025-05-14 11:01:32.803839138 +0900
+@@ -0,0 +1,2 @@
++hello
++world
+[cat <<E"O"F\nhello\nworld\nEOF\nNOPRINT]                             :status NG, expected 127 but got 1
+[cat <<EOF   \n$USER\n$NO_SUCH_VAR\n$FOO$BAR\nEOF]                    :
+--- out	2025-05-14 11:01:32.811839201 +0900
++++ cmp	2025-05-14 11:01:32.811839201 +0900
+@@ -0,0 +1,3 @@
++akitig
++
++
+[cat <<EOF   \n$USER\n$NO_SUCH_VAR\n$FOO$BAR\nEOF]                    :status NG, expected 0 but got 1
+[cat <<"EOF" \n$USER\n$NO_SUCH_VAR\n$FOO$BAR\nEOF]                    :
+--- out	2025-05-14 11:01:32.819839265 +0900
++++ cmp	2025-05-14 11:01:32.819839265 +0900
+@@ -0,0 +1,3 @@
++$USER
++$NO_SUCH_VAR
++$FOO$BAR
+[cat <<"EOF" \n$USER\n$NO_SUCH_VAR\n$FOO$BAR\nEOF]                    :status NG, expected 0 but got 1
+[cat <<EO"F" \n$USER\n$NO_SUCH_VAR\n$FOO$BAR\nEOF]                    :
+--- out	2025-05-14 11:01:32.827839328 +0900
++++ cmp	2025-05-14 11:01:32.827839328 +0900
+@@ -0,0 +1,3 @@
++$USER
++$NO_SUCH_VAR
++$FOO$BAR
+[cat <<EO"F" \n$USER\n$NO_SUCH_VAR\n$FOO$BAR\nEOF]                    :status NG, expected 0 but got 1
+[cat <<$EOF         \neof\n$EOF\nEOF]                                 :
+--- out	2025-05-14 11:01:32.835839391 +0900
++++ cmp	2025-05-14 11:01:32.835839391 +0900
+@@ -0,0 +1 @@
++eof
+[cat <<"$EOF"       \neof\n$EOF\nEOF]                                 :
+--- out	2025-05-14 11:01:32.843839455 +0900
++++ cmp	2025-05-14 11:01:32.843839455 +0900
+@@ -0,0 +1 @@
++eof
+[cat <<"$EOF"       \neof\n$EOF\nEOF]                                 :status NG, expected 127 but got 1
