@@ -550,9 +550,44 @@ void	free_tokens(t_token *t)
 int	builtin_export(char **a)
 {
 	char	*eq;
+	size_t	j;
 
+	if (!a[1])
+	{
+		for (int i = 0; environ[i]; i++)
+		{
+			printf("declare -x ");
+			j = 0;
+			while (environ[i][j] != '=')
+				printf("%c", environ[i][j++]);
+			if (environ[i][j + 1] == '\0')
+			{
+				printf("\n");
+				continue ;
+			}
+			else
+			{
+				printf("%c\"", environ[i][j]);
+				j++;
+				while (environ[i][j] != '\0')
+					printf("%c", environ[i][j++]);
+				printf("\"\n");
+			}
+		}
+		return (0);
+	}
+	j = 0;
 	for (int i = 1; a[i]; i++)
 	{
+		while (isalpha(a[i][j]) || a[i][j] == '=' || a[i][j] == '\'' || a[i][j] == '\"' || a[i][j] == ':' || a[i][j] == '/')
+			j++;
+		if (a[i][j] != '\0')
+		{
+			if (a[i + 1] == NULL)
+				return (1);
+			else
+				continue ;
+		}  
 		eq = strchr(a[i], '=');
 		if (eq)
 		{
