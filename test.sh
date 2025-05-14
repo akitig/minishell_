@@ -209,6 +209,12 @@ assert 'echo $USER'
 assert 'echo $USER$PATH$TERM'
 assert 'echo "$USER  $PATH   $TERM"'
 
+# Special Parameter $?
+assert 'echo $?'
+assert 'invalid\necho $?\necho $?'
+assert 'exit42\necho $?\necho $?'
+assert 'exit42\n\necho $?\necho $?'
+
 # ----------------------------------------------------------------- 
 cleanup
 

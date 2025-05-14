@@ -293,62 +293,46 @@ static char	*expand_vars(const char *s)
 
 	i = 0;
 	j = 0;
-	k = 0;
 	newlen = 0;
-	char var[NAME_MAX + 1], *val, *res, *v;
-	/* 1) 必要長を計算 */
+	char var[NAME_MAX + 1], *val, *res;
+	/* 1) 必要な長さを計算 */
 	while (s[i])
 	{
-		if (s[i] == '$' && s[i + 1] == '?')
-		{
-			v = getenv("?");
-			if (!v)
-				v = "0";
-			newlen += strlen(v);
-			i += 2;
-		}
-		else if (s[i] == '$' && (isalnum((unsigned char)s[i + 1]) || s[i
+		if (s[i] == '$' && (isalnum((unsigned char)s[i + 1]) || s[i
 				+ 1] == '_'))
 		{
-			i++;
 			k = 0;
+			i++;
 			while (s[i] && (isalnum((unsigned char)s[i]) || s[i] == '_')
 				&& k < NAME_MAX)
 				var[k++] = s[i++];
 			var[k] = '\0';
-			if ((val = getenv(var)))
+			val = getenv(var);
+			if (val)
 				newlen += strlen(val);
 		}
 		else
 			newlen++, i++;
 	}
-	/* 2) バッファ確保 */
+	/* 2) メモリ確保 */
 	res = malloc(newlen + 1);
 	if (!res)
 		fatal_error("malloc");
-	/* 3) 再構築 */
+	/* 3) 再度走査して文字列を構築 */
 	i = 0;
 	while (s[i])
 	{
-		if (s[i] == '$' && s[i + 1] == '?')
-		{
-			v = getenv("?");
-			if (!v)
-				v = "0";
-			strcpy(res + j, v);
-			j += strlen(v);
-			i += 2;
-		}
-		else if (s[i] == '$' && (isalnum((unsigned char)s[i + 1]) || s[i
+		if (s[i] == '$' && (isalnum((unsigned char)s[i + 1]) || s[i
 				+ 1] == '_'))
 		{
-			i++;
 			k = 0;
+			i++;
 			while (s[i] && (isalnum((unsigned char)s[i]) || s[i] == '_')
 				&& k < NAME_MAX)
 				var[k++] = s[i++];
 			var[k] = '\0';
-			if ((val = getenv(var)))
+			val = getenv(var);
+			if (val)
 			{
 				strcpy(res + j, val);
 				j += strlen(val);
@@ -360,6 +344,7 @@ static char	*expand_vars(const char *s)
 	res[j] = '\0';
 	return (res);
 }
+
 /* トークンのクォート除去＋変数展開 */
 void	expand_token(t_token *t)
 {
@@ -906,8 +891,7 @@ int	main(int argc, char **argv, char **envp)
 {
 	t_context ctx = {0};
 	char *line;
-	int status;
-
+	int status = 0;
 	(void)argc;
 	(void)argv;
 	rl_outstream = stderr;
@@ -917,12 +901,6 @@ int	main(int argc, char **argv, char **envp)
 			add_history(line);
 		status = interpret(line, envp, &ctx);
 		free(line);
-		/* 終了ステータスを環境変数 '?' に保存 */
-		{
-			char buf[12];
-			snprintf(buf, sizeof buf, "%d", status);
-			setenv("?", buf, 1);
-		}
 	}
 	return (status);
 }
