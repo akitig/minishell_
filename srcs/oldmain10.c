@@ -703,106 +703,7 @@ int	launch_external(char **a, t_token *t, char **envp)
 	free_tokens(t);
 	return (ret);
 }
-/* パイプ存在チェック */
-int	contains_pipe(t_token *t)
-{
-	while (t && !at_eof(t))
-	{
-		if (t->kind == TK_OP && strcmp(t->word, "|") == 0)
-			return (1);
-		t = t->next;
-	}
-	return (0);
-}
 
-/* 単一コマンドを実行 */
-void	run_simple(t_token *toks, char **envp)
-{
-	t_token	*xt;
-	t_node	*nd;
-	char	**argv;
-
-	xt = expand_and_merge_tokens(toks);
-	nd = parse(xt);
-	expand_token(nd->args);
-	argv = build_argv(nd->args);
-	if (!argv[0])
-		exit(127);
-	if (handle_builtin(argv, xt) >= 0)
-		exit(0);
-	launch_external(argv, xt, envp);
-	exit(0);
-}
-/* パイプライン実行 */
-int	execute_pipeline(t_token *toks, char **envp)
-{
-	int		cmds;
-	t_token	*p;
-	pid_t	*pids;
-	t_token	*seg;
-	t_token	*next;
-	int		old;
-
-	cmds = 1;
-	int(*pipefd)[2];
-	int i, j, idx = 0, status;
-	seg = toks;
-	/* コマンド数をカウント */
-	for (p = toks; !at_eof(p); p = p->next)
-		if (p->kind == TK_OP && strcmp(p->word, "|") == 0)
-			cmds++;
-	/* 動的配列確保 */
-	pipefd = malloc((cmds - 1) * sizeof *pipefd);
-	if ((cmds - 1) > 0 && !pipefd)
-		fatal_error("malloc");
-	pids = malloc(cmds * sizeof *pids);
-	if (!pids)
-		fatal_error("malloc");
-	/* パイプ作成 */
-	for (i = 0; i < cmds - 1; i++)
-		if (pipe(pipefd[i]) < 0)
-			fatal_error("pipe");
-	/* 各セグメントを fork で実行 */
-	for (p = toks;; p = p->next)
-	{
-		if ((p->kind == TK_OP && strcmp(p->word, "|") == 0) || at_eof(p))
-		{
-			next = at_eof(p) ? NULL : p->next;
-			/* この演算子をセグメント終端に */
-			old = p->kind;
-			p->kind = TK_EOF;
-			/* fork */
-			if ((pids[idx] = fork()) < 0)
-				fatal_error("fork");
-			if (pids[idx] == 0)
-			{
-				if (idx > 0)
-					dup2(pipefd[idx - 1][0], STDIN_FILENO);
-				if (idx < cmds - 1)
-					dup2(pipefd[idx][1], STDOUT_FILENO);
-				/* 全パイプを閉じる */
-				for (j = 0; j < cmds - 1; j++)
-					close(pipefd[j][0]), close(pipefd[j][1]);
-				run_simple(seg, envp);
-			}
-			/* 演算子を元に戻す */
-			p->kind = old;
-			idx++;
-			if (at_eof(p))
-				break ;
-			seg = next;
-		}
-	}
-	/* 親はパイプを閉じて子を待つ */
-	for (i = 0; i < cmds - 1; i++)
-		close(pipefd[i][0]), close(pipefd[i][1]);
-	status = 0;
-	for (i = 0; i < cmds; i++)
-		waitpid(pids[i], &status, 0);
-	free(pipefd);
-	free(pids);
-	return (WEXITSTATUS(status));
-}
 /* interpret 本体 */
 int	interpret(char *line, char **envp, t_context *ctx)
 {
@@ -819,10 +720,6 @@ int	interpret(char *line, char **envp, t_context *ctx)
 		ctx->syntax_error = 0;
 		return (e ? 258 : 127);
 	}
-	/* パイプラインがあれば専用ルーチンで */
-	if (contains_pipe(toks))
-		return (execute_pipeline(toks, envp));
-	/* 従来の単一コマンド処理 */
 	toks = expand_and_merge_tokens(toks);
 	nd = parse(toks);
 	if (!nd || !nd->args)

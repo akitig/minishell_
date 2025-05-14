@@ -200,6 +200,10 @@ assert 'cat <<EO"F" \n$USER\n$NO_SUCH_VAR\n$FOO$BAR\nEOF'
 	assert 'cat <<"$EOF"       \neof\n$EOF\nEOF'
 )
 
+# Pipe
+assert 'cat Makefile | grep minishell'
+assert 'cat | cat | ls\n\n'
+
 # ----------------------------------------------------------------- 
 cleanup
 
