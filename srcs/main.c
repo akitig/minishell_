@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -283,37 +284,42 @@ char	*remove_quotes(const char *w)
 }
 
 /* 展開 */
-void	expand_token(t_token *t)
-{
-	char	*tmp;
-
-	while (t)
-	{
-		if (t->kind == TK_WORD && (strchr(t->word, '\'') || strchr(t->word,
-					'\"')))
-		{
-			tmp = remove_quotes(t->word);
-			free(t->word);
-			t->word = tmp;
-		}
-		t = t->next;
-	}
-}
-/* 簡易変数展開 */
 static char	*expand_vars(const char *s)
 {
 	size_t	i;
 	size_t	j;
-	size_t	len;
-	char	*res;
-	char	var[NAME_MAX + 1];
-	char	*val;
 	size_t	k;
+	size_t	newlen;
 
-	i = 0, j = 0, len = strlen(s);
-	res = malloc(len * 2 + 1);
+	i = 0;
+	j = 0;
+	newlen = 0;
+	char var[NAME_MAX + 1], *val, *res;
+	/* 1) 必要な長さを計算 */
+	while (s[i])
+	{
+		if (s[i] == '$' && (isalnum((unsigned char)s[i + 1]) || s[i
+				+ 1] == '_'))
+		{
+			k = 0;
+			i++;
+			while (s[i] && (isalnum((unsigned char)s[i]) || s[i] == '_')
+				&& k < NAME_MAX)
+				var[k++] = s[i++];
+			var[k] = '\0';
+			val = getenv(var);
+			if (val)
+				newlen += strlen(val);
+		}
+		else
+			newlen++, i++;
+	}
+	/* 2) メモリ確保 */
+	res = malloc(newlen + 1);
 	if (!res)
 		fatal_error("malloc");
+	/* 3) 再度走査して文字列を構築 */
+	i = 0;
 	while (s[i])
 	{
 		if (s[i] == '$' && (isalnum((unsigned char)s[i + 1]) || s[i
@@ -337,6 +343,49 @@ static char	*expand_vars(const char *s)
 	}
 	res[j] = '\0';
 	return (res);
+}
+
+/* トークンのクォート除去＋変数展開 */
+void	expand_token(t_token *t)
+{
+	bool	has_sq;
+	bool	has_dq;
+	char	*orig;
+	char	*noq;
+	char	*exp;
+	char	*p;
+
+	while (t)
+	{
+		if (t->kind == TK_WORD)
+		{
+			/* 元の文字列を調べる */
+			has_sq = false;
+			has_dq = false;
+			for (p = t->word; *p; ++p)
+				if (*p == '\'')
+					has_sq = true;
+				else if (*p == '"')
+					has_dq = true;
+			orig = t->word;
+			/* 引用符を取り除く */
+			if (has_sq || has_dq)
+			{
+				noq = remove_quotes(orig);
+				free(orig);
+				orig = noq;
+			}
+			/* シングルクォート内以外で変数展開 */
+			if (!has_sq)
+			{
+				exp = expand_vars(orig);
+				free(orig);
+				orig = exp;
+			}
+			t->word = orig;
+		}
+		t = t->next;
+	}
 }
 
 /* 連結＋EOF追加 */

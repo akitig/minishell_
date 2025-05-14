@@ -204,6 +204,11 @@ assert 'cat <<EO"F" \n$USER\n$NO_SUCH_VAR\n$FOO$BAR\nEOF'
 assert 'cat Makefile | grep minishell'
 assert 'cat | cat | ls\n\n'
 
+# Expand Variable
+assert 'echo $USER'
+assert 'echo $USER$PATH$TERM'
+assert 'echo "$USER  $PATH   $TERM"'
+
 # ----------------------------------------------------------------- 
 cleanup
 
