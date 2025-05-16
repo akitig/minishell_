@@ -215,6 +215,66 @@ assert 'invalid\necho $?\necho $?'
 assert 'exit42\necho $?\necho $?'
 assert 'exit42\n\necho $?\necho $?'
 
+# Signal handling
+# echo "int main() { while (1) ; }" | gcc -xc -o infinite_loop -
+
+# ## Signal to shell processes
+# print_desc "SIGTERM to SHELL"
+# (sleep 0.01; pkill -SIGTERM bash;
+#  sleep 0.01; pkill -SIGTERM minishell) &
+# assert './infinite_loop' 2>/dev/null # Redirect stderr to suppress signal terminated message
+
+# print_desc "SIGQUIT to SHELL"
+# (sleep 0.01; pkill -SIGQUIT bash; # SIGQUIT should not kill the shell
+#  sleep 0.01; pkill -SIGTERM bash;
+#  sleep 0.01; pkill -SIGQUIT minishell; # SIGQUIT should not kill the shell
+#  sleep 0.01; pkill -SIGTERM minishell) &
+# assert './infinite_loop' 2>/dev/null # Redirect stderr to suppress signal terminated message
+
+# print_desc "SIGINT to SHELL"
+# (sleep 0.01; pkill -SIGINT bash; # SIGINT should not kill the shell
+#  sleep 0.01; pkill -SIGTERM bash;
+#  sleep 0.01; pkill -SIGINT minishell; # SIGINT should not kill the shell
+#  sleep 0.01; pkill -SIGTERM minishell) &
+# assert './infinite_loop' 2>/dev/null # Redirect stderr to suppress signal terminated message
+
+# ## Signal to child processes
+# print_desc "SIGTERM to child process"
+# (sleep 0.01; pkill -SIGTERM infinite_loop;
+#  sleep 0.01; pkill -SIGTERM infinite_loop) &
+# assert './infinite_loop'
+
+# print_desc "SIGINT to child process"
+# (sleep 0.01; pkill -SIGINT infinite_loop;
+#  sleep 0.01; pkill -SIGINT infinite_loop) &
+# assert './infinite_loop'
+
+# print_desc "SIGQUIT to child process"
+# (sleep 0.01; pkill -SIGQUIT infinite_loop;
+#  sleep 0.01; pkill -SIGQUIT infinite_loop) &
+# assert './infinite_loop'
+
+# print_desc "SIGUSR1 to child process"
+# (sleep 0.01; pkill -SIGUSR1 infinite_loop;
+#  sleep 0.01; pkill -SIGUSR1 infinite_loop) &
+# assert './infinite_loop'
+
+# Builtin
+## exit
+assert 'exit'
+assert 'exit 42'
+assert 'exit -42'
+assert 'exit +42'
+assert 'exit ""'
+assert 'exit hello'
+assert 'exit 42Tokyo'
+assert 'exit 1 2'
+assert 'exit 9223372036854775806'
+assert 'exit 9223372036854775807'
+assert 'exit 9223372036854775808'
+assert 'exit -9223372036854775807'
+assert 'exit -9223372036854775808'
+assert 'exit -9223372036854775809'
 # ----------------------------------------------------------------- 
 cleanup
 

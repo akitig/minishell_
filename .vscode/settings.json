@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "*.code-snippets": "bat",
+        "typeinfo": "c"
+    }
+}
