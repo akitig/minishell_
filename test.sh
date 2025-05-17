@@ -275,6 +275,84 @@ assert 'exit 9223372036854775808'
 assert 'exit -9223372036854775807'
 assert 'exit -9223372036854775808'
 assert 'exit -9223372036854775809'
+
+## export
+print_desc "Output of 'export' differs, but it's ok."
+assert 'export' # order of variables, default variables differs...
+assert 'export | grep nosuch | sort'
+assert 'export nosuch\n export | grep nosuch | sort'
+assert 'export nosuch=fuga\n export | grep nosuch | sort'
+assert 'export nosuch=fuga hoge=nosuch\n export | grep nosuch | sort'
+assert 'export [invalid]'
+assert 'export [invalid_nosuch]\n export | grep nosuch | sort'
+assert 'export [invalid]=nosuch\n export | grep nosuch | sort'
+assert 'export [invalid] nosuch hoge=nosuch\n export | grep nosuch | sort'
+assert 'export nosuch [invalid] hoge=nosuch\n export | grep nosuch | sort'
+assert 'export nosuch hoge=nosuch [invalid]\n export | grep nosuch | sort'
+assert 'export nosuch="nosuch2=hoge"\nexport $nosuch\n export | grep nosuch | sort'
+
+## unset
+(
+	print_desc 'export hoge fuga=fuga'
+	export hoge fuga=fuga
+	assert 'unset'
+	assert 'unset hoge'
+	assert 'unset fuga'
+	assert 'unset nosuch'
+	assert 'unset [invalid]'
+	assert 'unset hoge fuga'
+	assert 'unset hoge nosuch fuga'
+	assert 'unset fuga \n export | echo $fuga'
+	assert 'unset [invalid] fuga \n echo $fuga'
+)
+
+## env
+print_desc "Output of 'env' differs, but it's ok."
+assert 'env' # order of variables, default variables differs...
+assert 'env | grep hoge | sort'
+
+## cd
+assert 'cd'
+assert 'cd .'
+assert 'cd ..'
+assert 'cd ///'
+assert 'cd /tmp'
+assert 'cd /tmp/'
+assert 'cd /tmp///'
+assert 'cd /../../../././.././'
+assert 'cd src'
+assert 'unset HOME\ncd'
+
+assert 'cd \n echo $PWD'
+assert 'cd \n echo $PWD'
+assert 'cd .\n echo $PWD'
+assert 'cd ..\n echo $PWD'
+assert 'cd ///\n echo $PWD'
+assert 'cd /tmp\n echo $PWD'
+assert 'cd /tmp/\n echo $PWD'
+assert 'cd /tmp///\n echo $PWD'
+assert 'cd /../../../././.././\n echo $PWD'
+assert 'cd src\n echo $PWD'
+assert 'unset HOME\ncd \n echo $PWD'
+
+## echo
+assert 'echo'
+assert 'echo hello'
+assert 'echo hello "    " world'
+assert 'echo -n'
+assert 'echo -n hello'
+assert 'echo -n hello world'
+assert 'echo hello -n'
+assert 'echo -nn'
+assert 'echo -n-n-n'
+assert 'echo ";|()"'
+
+## export attribute
+assert 'unset PWD \n cd \n echo $PWD \ncd /tmp\necho $PWD'
+assert 'unset PWD\ncd\necho $OLDPWD\ncd /tmp\necho $OLDPWD'
+assert 'unset PWD\ncd\nexport|grep PWD\ncd /tmp\nexport|grep PWD'
+assert 'unset PWD\ncd\nenv|grep PWD\ncd /tmp\nenv|grep PWD'
+
 # ----------------------------------------------------------------- 
 cleanup
 

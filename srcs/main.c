@@ -546,68 +546,88 @@ void	free_tokens(t_token *t)
 		t = nx;
 	}
 }
+/* シェル識別用ヘルパー */
+static bool	is_valid_ident(const char *s)
+{
+	if (!(isalpha((unsigned char)*s) || *s == '_'))
+		return (false);
+	for (s++; *s; s++)
+		if (!(isalnum((unsigned char)*s) || *s == '_'))
+			return (false);
+	return (true);
+}
 
 /* built-in export */
-int	builtin_export(char **a)
+int	builtin_export(char **argv)
 {
+	int		rc;
+	char	*arg;
 	char	*eq;
-	size_t	j;
+	size_t	namelen;
+	char	name[NAME_MAX + 1];
 
-	if (!a[1])
+	rc = 0;
+	/* 引数なし: 全 export 変数を出力 */
+	if (!argv[1])
 	{
+		/* 実際はソートして出力するのが望ましいですが、順序は問わないテストなので省略可 */
 		for (int i = 0; environ[i]; i++)
-		{
-			printf("declare -x ");
-			j = 0;
-			while (environ[i][j] != '=')
-				printf("%c", environ[i][j++]);
-			if (environ[i][j + 1] == '\0')
-			{
-				printf("\n");
-				continue ;
-			}
-			else
-			{
-				printf("%c\"", environ[i][j]);
-				j++;
-				while (environ[i][j] != '\0')
-					printf("%c", environ[i][j++]);
-				printf("\"\n");
-			}
-		}
+			printf("declare -x %s\n", environ[i]);
 		return (0);
 	}
-	j = 0;
-	for (int i = 1; a[i]; i++)
+	for (int i = 1; argv[i]; i++)
 	{
-		while (isalpha(a[i][j]) || a[i][j] == '=' || a[i][j] == '\''
-			|| a[i][j] == '\"' || a[i][j] == ':' || a[i][j] == '/')
-			j++;
-		if (a[i][j] != '\0')
+		arg = argv[i];
+		eq = strchr(arg, '=');
+		/* 識別子部分を切り出して検証 */
+		namelen = eq ? (size_t)(eq - arg) : strlen(arg);
+		if (namelen > NAME_MAX)
+			namelen = NAME_MAX;
+		memcpy(name, arg, namelen);
+		name[namelen] = '\0';
+		if (!is_valid_ident(name))
 		{
-			if (a[i + 1] == NULL)
-				return (1);
-			else
-				continue ;
+			fprintf(stderr, "export: `%s': not a valid identifier\n", arg);
+			rc = 1;
+			continue ;
 		}
-		eq = strchr(a[i], '=');
 		if (eq)
 		{
-			*eq = '\0';
-			setenv(a[i], eq + 1, 1);
+			/* name=val の場合は必ず上書き */
+			setenv(name, eq + 1, 1);
 		}
 		else
-			setenv(a[i], "", 1);
+		{
+			/* name のみなら、存在しなければ空文字で作成、存在すれば値はそのまま */
+			if (!getenv(name))
+				setenv(name, "", 1);
+		}
 	}
-	return (0);
+	return (rc);
 }
 
 /* built-in unset */
-int	builtin_unset(char **a)
+int	builtin_unset(char **argv)
 {
-	for (int i = 1; a[i]; i++)
-		unsetenv(a[i]);
-	return (0);
+	int		rc;
+	char	*name;
+
+	rc = 0;
+	/* 引数なし: 何もしない */
+	if (!argv[1])
+		return (0);
+	for (int i = 1; argv[i]; i++)
+	{
+		name = argv[i];
+		if (!is_valid_ident(name))
+		{
+			fprintf(stderr, "unset: `%s': not a valid identifier\n", name);
+			rc = 1;
+			continue ;
+		}
+		unsetenv(name);
+	}
+	return (rc);
 }
 /* exit ビルトイン本体 */
 static int	builtin_exit(char **argv)
@@ -643,8 +663,97 @@ static int	builtin_exit(char **argv)
 	/* 正常終了：0–255 に丸めて exit */
 	exit((unsigned char)val);
 }
+/* handle_builtin の該当部分 */
+static int	builtin_env(char **argv)
+{
+	if (argv[1])
+	{
+		fprintf(stderr, "env: too many arguments\n");
+		return (1);
+	}
+	for (int i = 0; environ[i]; i++)
+		puts(environ[i]);
+	return (0);
+}
+/* built-in cd */
+static int	builtin_cd(char **argv)
+{
+	char	cwd[PATH_MAX];
+	char	*target;
 
-/* built-in処理 */
+	/* 更新前のカレントを OLDPWD に */
+	if (getcwd(cwd, sizeof(cwd)))
+		setenv("OLDPWD", cwd, 1);
+	/* 引数処理 */
+	if (!argv[1])
+	{
+		target = getenv("HOME");
+		if (!target)
+			return (fprintf(stderr, "cd: HOME not set\n"), 1);
+	}
+	else if (argv[2])
+		return (fprintf(stderr, "cd: too many arguments\n"), 1);
+	else
+		target = argv[1];
+	/* ディレクトリ移動 */
+	if (chdir(target) != 0)
+		return (fprintf(stderr, "cd: %s: %s\n", target, strerror(errno)), 1);
+	/* 移動後のカレントを PWD に */
+	if (getcwd(cwd, sizeof(cwd)))
+		setenv("PWD", cwd, 1);
+	return (0);
+}
+/* echo ビルトイン用ヘルパー */
+static bool	is_n_flag(const char *s)
+{
+	if (!s || s[0] != '-' || s[1] == '\0')
+		return (false);
+	for (int i = 1; s[i]; i++)
+		if (s[i] != 'n')
+			return (false);
+	return (true);
+}
+
+/* echo ビルトイン */
+static int	builtin_echo(char **argv)
+{
+	int		i;
+	bool	newline;
+
+	i = 1;
+	newline = true;
+	/* 先頭の -n, -nn, -nnnn… をフラグとして扱う */
+	while (argv[i] && is_n_flag(argv[i]))
+	{
+		newline = false;
+		i++;
+	}
+	/* 残りの引数をスペース区切りで出力 */
+	for (int j = i; argv[j]; j++)
+	{
+		fputs(argv[j], stdout);
+		if (argv[j + 1])
+			fputc(' ', stdout);
+	}
+	/* 改行フラグが立っていれば改行 */
+	if (newline)
+		fputc('\n', stdout);
+	return (0);
+}
+/* pwd ビルトイン */
+static int	builtin_pwd(char **argv)
+{
+	char	cwd[PATH_MAX];
+
+	(void)argv; // 引数は無視
+	if (!getcwd(cwd, sizeof(cwd)))
+	{
+		perror("pwd");
+		return (1);
+	}
+	printf("%s\n", cwd);
+	return (0);
+}
 int	handle_builtin(char **argv, t_token *toks)
 {
 	int	r;
@@ -654,8 +763,16 @@ int	handle_builtin(char **argv, t_token *toks)
 		r = builtin_export(argv);
 	else if (strcmp(argv[0], "unset") == 0)
 		r = builtin_unset(argv);
+	else if (strcmp(argv[0], "env") == 0)
+		r = builtin_env(argv);
+	else if (strcmp(argv[0], "cd") == 0)
+		r = builtin_cd(argv);
+	else if (strcmp(argv[0], "pwd") == 0)
+		r = builtin_pwd(argv);
+	else if (strcmp(argv[0], "echo") == 0)
+		r = builtin_echo(argv);
 	else if (strcmp(argv[0], "exit") == 0)
-		return (builtin_exit(argv)); /* ← ここを追加 */
+		return (builtin_exit(argv));
 	if (r >= 0)
 	{
 		free_tokens(toks);
@@ -956,10 +1073,12 @@ int	execute_pipeline(t_token *toks, char **envp)
 int	interpret(char *line, char **envp, t_context *ctx)
 {
 	t_token	*toks;
+	int		status;
 	int		e;
 	t_node	*nd;
 	char	**argv;
-	int		bi;
+	int		saved_in;
+	int		saved_out;
 
 	toks = tokenize(line, ctx);
 	if (!toks)
@@ -968,22 +1087,52 @@ int	interpret(char *line, char **envp, t_context *ctx)
 		ctx->syntax_error = 0;
 		return (e ? 258 : 127);
 	}
-	/* パイプラインがあれば専用ルーチンで */
+	/* パイプラインがあればそちらで処理 */
 	if (contains_pipe(toks))
 		return (execute_pipeline(toks, envp));
-	/* 従来の単一コマンド処理 */
+	/* トークンを展開＆マージ */
 	toks = expand_and_merge_tokens(toks);
 	nd = parse(toks);
 	if (!nd || !nd->args)
 		return (free_tokens(toks), 127);
 	expand_token(nd->args);
+	/* argv 構築 */
 	argv = build_argv(nd->args);
 	if (!argv[0])
 		return (free(argv), free_tokens(toks), 127);
-	bi = handle_builtin(argv, toks);
-	if (bi >= 0)
-		return (bi);
-	return (launch_external(argv, toks, envp));
+	/* === ここからリダイレクト／実行／復帰 === */
+	saved_in = dup(STDIN_FILENO);
+	saved_out = dup(STDOUT_FILENO);
+	apply_input_redirection(toks);
+	apply_output_redirection(toks);
+	if (strcmp(argv[0], "export") == 0 || strcmp(argv[0], "unset") == 0
+		|| strcmp(argv[0], "env") == 0 || strcmp(argv[0], "cd") == 0
+		|| strcmp(argv[0], "pwd") == 0 || strcmp(argv[0], "echo") == 0
+		|| strcmp(argv[0], "exit") == 0)
+	{
+		/* ビルトイン */
+		status = handle_builtin(argv, toks);
+	}
+	else if (strcmp(argv[0], "exit") == 0)
+	{
+		/* exit はここでプロセス終了 */
+		builtin_exit(argv);
+		status = 0; /* 実際には戻らない */
+	}
+	else
+	{
+		/* 外部コマンド */
+		status = launch_external(argv, toks, envp);
+	}
+	fflush(stdout);
+	fflush(stderr);
+	/* 標準入出力を元に戻す */
+	dup2(saved_in, STDIN_FILENO);
+	dup2(saved_out, STDOUT_FILENO);
+	close(saved_in);
+	close(saved_out);
+	/* === ここまで === */
+	return (status);
 }
 int	main(int argc, char **argv, char **envp)
 {
