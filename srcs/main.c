@@ -467,7 +467,7 @@ t_node	*new_node(e_node_kind k)
 
 /* 構文解析 */
 
-/* 構文解析：>, >>, <, << をスキップ */
+// --- 単純コマンドの AST を作る（リダイレクトと空文字列トークンは除外） ---
 t_node	*parse(t_token *t)
 {
 	t_node	*n;
@@ -475,11 +475,18 @@ t_node	*parse(t_token *t)
 	n = new_node(ND_SIMPLE_CMD);
 	while (t && !at_eof(t))
 	{
+		// リダイレクト演算子なら「演算子＋ファイル名」を飛ばす
 		if (t->kind == TK_OP && (strcmp(t->word, ">") == 0 || strcmp(t->word,
 					">>") == 0 || strcmp(t->word, "<") == 0 || strcmp(t->word,
 					"<<") == 0))
 		{
-			t = t->next->next;
+			t = t->next ? t->next->next : NULL;
+			continue ;
+		}
+		// 空文字列トークン（例: 未定義変数の展開）を飛ばす
+		if (t->kind == TK_WORD && t->word[0] == '\0')
+		{
+			t = t->next;
 			continue ;
 		}
 		append_tok(&n->args, tokdup(t));
@@ -632,26 +639,18 @@ int	builtin_unset(char **argv)
 /* exit ビルトイン本体 */
 static int	builtin_exit(char **argv)
 {
-	char		*arg;
 	char		*endptr;
 	long long	val;
-	int			last_status;
-	char		*ps;
 
-	/* 引数なし: 環境変数 "?" から前回ステータス取得 */
+	/* 引数なし: 常にステータス 0 で終了 */
 	if (!argv[1])
-	{
-		ps = getenv("?");
-		last_status = ps ? atoi(ps) : 0;
-		exit(last_status);
-	}
-	arg = argv[1];
+		exit(0);
 	errno = 0;
-	val = strtoll(arg, &endptr, 10);
+	val = strtoll(argv[1], &endptr, 10);
 	/* 数字で始まっていない or 範囲外 */
-	if (endptr == arg || *endptr != '\0' || errno == ERANGE)
+	if (endptr == argv[1] || *endptr != '\0' || errno == ERANGE)
 	{
-		fprintf(stderr, "exit: %s: numeric argument required\n", arg);
+		fprintf(stderr, "exit: %s: numeric argument required\n", argv[1]);
 		exit(2);
 	}
 	/* 引数が多すぎる */
@@ -798,95 +797,70 @@ char	**build_argv(t_token *t)
 	a[i] = NULL;
 	return (a);
 }
+
+// --- 標準入力リダイレクト (<) ---
 void	apply_input_redirection(t_token *t)
 {
-	bool	used;
-	char	*ev;
+	int		fd;
+	char	*fname;
 
-	int fd, pipefd[2], do_exp;
-	char *orig, *tmp, *delim, *line2;
-	used = false;
 	while (t && !at_eof(t))
 	{
-		if (t->kind == TK_OP && strcmp(t->word, "<<") == 0 && t->next)
+		if (t->kind == TK_OP && strcmp(t->word, "<") == 0 && t->next)
 		{
-			orig = t->next->word;
-			/* 前のヒアドキュメント用パイプを捨てる */
-			if (used)
-			{
-				close(pipefd[0]);
-				close(pipefd[1]);
-			}
-			if (pipe(pipefd) < 0)
-				fatal_error("pipe");
-			used = true;
-			/* 区切り文字からクォートを除去 */
-			tmp = strdup_safe(orig);
-			delim = remove_quotes(tmp);
-			free(tmp);
-			/* 区切り文字にクォートがなければ変数展開する */
-			do_exp = !strchr(orig, '\'') && !strchr(orig, '\"');
-			while ((line2 = readline("> ")) != NULL)
-			{
-				if (strcmp(line2, delim) == 0)
-				{
-					free(line2);
-					break ;
-				}
-				if (do_exp)
-				{
-					ev = expand_vars(line2);
-					write(pipefd[1], ev, strlen(ev));
-					free(ev);
-				}
-				else
-					write(pipefd[1], line2, strlen(line2));
-				write(pipefd[1], "\n", 1);
-				free(line2);
-			}
-			close(pipefd[1]);
-			free(delim);
-		}
-		else if (!used && t->kind == TK_OP && strcmp(t->word, "<") == 0
-			&& t->next)
-		{
-			fd = open(t->next->word, O_RDONLY);
+			// 次のトークンをファイル名とみなして open
+			fname = remove_quotes(t->next->word);
+			fd = open(fname, O_RDONLY);
+			free(fname);
 			if (fd < 0)
-				fatal_error("open");
+			{
+				perror(t->next->word);
+				exit(1);
+			}
 			dup2(fd, STDIN_FILENO);
 			close(fd);
+			// 演算子とファイル名トークンをスキップ
+			t = t->next;
 		}
 		t = t->next;
 	}
-	if (used)
-	{
-		dup2(pipefd[0], STDIN_FILENO);
-		close(pipefd[0]);
-	}
 }
 
-/* 出力リダイレクト (>) とアペンド (>>) */
+// --- 標準出力リダイレクト (>) とアペンド (>>) ---
 void	apply_output_redirection(t_token *t)
 {
-	int	fd;
+	int		fd;
+	char	*fname;
 
 	while (t && !at_eof(t))
 	{
-		if (t->kind == TK_OP && strcmp(t->word, ">>") == 0 && t->next)
+		if (t->kind == TK_OP && strcmp(t->word, ">") == 0 && t->next)
 		{
-			fd = open(t->next->word, O_WRONLY | O_CREAT | O_APPEND, 0644);
+			fname = remove_quotes(t->next->word);
+			fd = open(fname, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+			free(fname);
 			if (fd < 0)
-				fatal_error("open");
+			{
+				perror(t->next->word);
+				exit(1);
+			}
 			dup2(fd, STDOUT_FILENO);
 			close(fd);
+			t = t->next; // 演算子とファイル名をスキップ
 		}
-		else if (t->kind == TK_OP && strcmp(t->word, ">") == 0 && t->next)
+		else if (t->kind == TK_OP && strcmp(t->word, ">>") == 0 && t->next)
 		{
-			fd = open(t->next->word, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+			fname = remove_quotes(t->next->word);
+			fd = open(fname, O_WRONLY | O_CREAT | O_APPEND, 0644);
+			free(fname);
 			if (fd < 0)
-				fatal_error("open");
+			{
+				perror(t->next->word);
+				exit(1);
+			}
 			dup2(fd, STDOUT_FILENO);
 			close(fd);
+			t = t->next; // 演算子とファイル名をスキップ
 		}
 		t = t->next;
 	}
@@ -930,7 +904,7 @@ int	check_and_run(char *p, char **a, t_token *t, char **envp)
 
 	if (stat(p, &sb) == 0 && S_ISDIR(sb.st_mode))
 	{
-		dprintf(2, "minishell: %s: is a directory\n", a[0]);
+		dprintf(2, "minishell: %s: Is a directory\n", a[0]);
 		return (126);
 	}
 	if (access(p, X_OK) != 0)
@@ -977,6 +951,31 @@ int	contains_pipe(t_token *t)
 	}
 	return (0);
 }
+// /* フィルタリング: 空文字列トークンを取り除く */
+// static char	**filter_argv(char **argv)
+// {
+// 	int		len;
+// 	char	**p;
+
+// 	len = 0;
+// 	int i, j;
+// 	while (argv[len])
+// 		len++;
+// 	p = calloc(len + 1, sizeof(char *));
+// 	if (!p)
+// 		fatal_error("calloc");
+// 	j = 0;
+// 	for (i = 0; i < len; i++)
+// 	{
+// 		if (argv[i] && argv[i][0] != '\0')
+// 			p[j++] = argv[i];
+// 	}
+// 	p[j] = NULL;
+// 	free(argv);
+// 	return (p);
+// }
+
+// パイプ内部／子プロセス用：単一コマンド実行
 void	run_simple(t_token *toks, char **envp)
 {
 	int		ret;
@@ -988,11 +987,14 @@ void	run_simple(t_token *toks, char **envp)
 	signal(SIGQUIT, SIG_DFL);
 	signal(SIGTERM, SIG_DFL);
 	xt = expand_and_merge_tokens(toks);
+	// 出力→入力 の順でリダイレクトを適用
+	apply_output_redirection(xt);
+	apply_input_redirection(xt);
 	nd = parse(xt);
 	expand_token(nd->args);
 	argv = build_argv(nd->args);
-	if (!argv[0])
-		exit(127);
+	if (!argv[0] || argv[0][0] == '\0')
+		exit(0);
 	if (handle_builtin(argv, xt) >= 0)
 		exit(0);
 	ret = launch_external(argv, xt, envp);
@@ -1069,17 +1071,14 @@ int	execute_pipeline(t_token *toks, char **envp)
 	free(pids);
 	return (WEXITSTATUS(status));
 }
-/* interpret 本体 */
+// interpret 本体：パイプ／リダイレクト兼用
 int	interpret(char *line, char **envp, t_context *ctx)
 {
-	t_token	*toks;
-	int		status;
-	int		e;
 	t_node	*nd;
 	char	**argv;
-	int		saved_in;
-	int		saved_out;
 
+	t_token *toks, *xt;
+	int saved_in, saved_out, status, e;
 	toks = tokenize(line, ctx);
 	if (!toks)
 	{
@@ -1087,53 +1086,58 @@ int	interpret(char *line, char **envp, t_context *ctx)
 		ctx->syntax_error = 0;
 		return (e ? 258 : 127);
 	}
-	/* パイプラインがあればそちらで処理 */
+	if (toks->kind == TK_EOF)
+	{
+		free_tokens(toks);
+		return (0);
+	}
 	if (contains_pipe(toks))
 		return (execute_pipeline(toks, envp));
-	/* トークンを展開＆マージ */
-	toks = expand_and_merge_tokens(toks);
-	nd = parse(toks);
-	if (!nd || !nd->args)
-		return (free_tokens(toks), 127);
-	expand_token(nd->args);
-	/* argv 構築 */
-	argv = build_argv(nd->args);
-	if (!argv[0])
-		return (free(argv), free_tokens(toks), 127);
-	/* === ここからリダイレクト／実行／復帰 === */
 	saved_in = dup(STDIN_FILENO);
 	saved_out = dup(STDOUT_FILENO);
-	apply_input_redirection(toks);
-	apply_output_redirection(toks);
-	if (strcmp(argv[0], "export") == 0 || strcmp(argv[0], "unset") == 0
-		|| strcmp(argv[0], "env") == 0 || strcmp(argv[0], "cd") == 0
-		|| strcmp(argv[0], "pwd") == 0 || strcmp(argv[0], "echo") == 0
-		|| strcmp(argv[0], "exit") == 0)
+	xt = expand_and_merge_tokens(toks);
+	// 出力→入力 の順でリダイレクトを適用
+	apply_output_redirection(xt);
+	apply_input_redirection(xt);
+	nd = parse(xt);
+	if (!nd || !nd->args)
 	{
-		/* ビルトイン */
-		status = handle_builtin(argv, toks);
+		free_tokens(xt);
+		dup2(saved_in, STDIN_FILENO);
+		dup2(saved_out, STDOUT_FILENO);
+		close(saved_in);
+		close(saved_out);
+		return (127);
 	}
-	else if (strcmp(argv[0], "exit") == 0)
+	expand_token(nd->args);
+	argv = build_argv(nd->args);
+	if (!argv[0] || argv[0][0] == '\0')
 	{
-		/* exit はここでプロセス終了 */
-		builtin_exit(argv);
-		status = 0; /* 実際には戻らない */
+		free(argv);
+		free_tokens(xt);
+		dup2(saved_in, STDIN_FILENO);
+		dup2(saved_out, STDOUT_FILENO);
+		close(saved_in);
+		close(saved_out);
+		return (0);
+	}
+	if (!strcmp(argv[0], "export") || !strcmp(argv[0], "unset")
+		|| !strcmp(argv[0], "env") || !strcmp(argv[0], "cd") || !strcmp(argv[0],
+			"pwd") || !strcmp(argv[0], "echo") || !strcmp(argv[0], "exit"))
+	{
+		status = handle_builtin(argv, xt);
 	}
 	else
 	{
-		/* 外部コマンド */
-		status = launch_external(argv, toks, envp);
+		status = launch_external(argv, xt, envp);
 	}
-	fflush(stdout);
-	fflush(stderr);
-	/* 標準入出力を元に戻す */
 	dup2(saved_in, STDIN_FILENO);
 	dup2(saved_out, STDOUT_FILENO);
 	close(saved_in);
 	close(saved_out);
-	/* === ここまで === */
 	return (status);
 }
+
 int	main(int argc, char **argv, char **envp)
 {
 	t_context ctx = {0};
